@@ -25,7 +25,7 @@
 		$(function() {
 
 			var idRegExp = /_(\d+)$/,
-				empty = new Array(10),
+				EMPTY = new Array(10),
 
 				sectionLinks = $("#nav > li a"),
 				lists = [];
@@ -40,7 +40,7 @@
 				}
 				item.data("init", true);
 				
-				var id = (item.attr("id").match(idRegExp) || empty)[1],
+				var id = (item.attr("id").match(idRegExp) || EMPTY)[1],
 					sectionList = id ? $("#navSection_" + id) : false;
 
 				if (sectionList.length) {
@@ -56,7 +56,7 @@
 			
 			sectionLinks.bind("focus", function() {
 				STATE.current = $(this);
-				STATE.level = MACHINE.top;
+				STATE.level = "top";
 				changeFocusable($(this));
 			});
 			
@@ -66,16 +66,20 @@
 				previouslyFocusable = el;
 			};
 			
+			function machineAction(action, object) {
+				STATE.level[action](object);
+			};
+			
 			function initList(list) {
 				list.find("> li > a").bind("focus", function() {
 					STATE.current = $(this);
-					STATE.level = MACHINE.firstlevel;
+					STATE.level = "firstlevel";
 					changeFocusable($(this));
 				});
-				
+
 				list.find("> li li a").bind("focus", function() {
 					STATE.current = $(this);
-					STATE.level = MACHINE.lowerlevel;
+					STATE.level = "lowerlevel";
 					changeFocusable($(this));
 				});
 				
@@ -83,70 +87,131 @@
 			};
 			
 			var keyboardRepeatInterval,
-				cancelRepeat = false;;
+				mouseDelay;
 			
 			$("#nav").bind("keydown", function(e) {
 				clearInterval(keyboardRepeatInterval);
-				cancelRepeat = false;
+				clearTimeout(mouseDelay);
 				
-				if (STATE.level && STATE.level.keydown[e.keyCode]) {
-					var func = STATE.level[STATE.level.keydown[e.keyCode]];
-					func(STATE.current);
+				var action = machineAction(STATE.level, "keydown", e.keyCode, STATE.current);
+				if (action) {
+					action();
 					
-					// keyboardRepeatInterval = setInterval(function() {
-					// 	if (! cancelRepeat) {
-					// 		func(STATE.current);
-					// 		keyboardRepeatInterval = setInterval(function() {
-					// 			if (! cancelRepeat) {
-					// 				func(STATE.current);
-					// 			}
-					// 		}, 50);
-					// 	}
+					// keyboardRepeatInterval = setTimeout(function() {
+					// 	action();
+					// 	keyboardRepeatInterval = setInterval(function() {
+					// 		action();
+					// 	}, 50);
 					// }, 250);
 				}
 			});
 			
+			$("#nav a").live("mouseover", function() {
+				clearTimeout(mouseDelay);
+				
+				$(this).focus();
+				
+				var action = machineAction(STATE.level, "mouse", "over", STATE.current);
+				if (action) {
+					mouseDelay = setTimeout(function() {
+						action();
+					}, 200);
+				}
+			});
+			
 			$(document).bind("keyup", function() {
-				cancelRepeat = true;
 				clearInterval(keyboardRepeatInterval);
 			});
+			
+			function machineAction(level, control, event, el) {
+				if (MACHINE[level] && MACHINE[level][control] && MACHINE[level][control][event]) {
+					
+					var funcnames = MACHINE[level][control][event],
+						funcs = [];
+					
+					if (! $.isArray(funcnames)) {
+						funcnames = [funcnames];
+					}
+					
+					for (var i = -1, name; name = funcnames[++i];) {
+						funcs.push(MACHINE[level][name]);
+					}
+					
+					return function() {
+						for (var i = -1, func; func = funcs[++i];) {
+							func(el);
+						}
+					};
+				}
+			};
+			
+			function getMachineLevel(el) {
+				var list = el.parent().parent();
+				
+				switch (true) {
+					case list.attr("id") === "nav":
+						return MACHINE.top;
+					case list.hasClass("subsection"):
+						return MACHINE.firstlevel;
+					default:
+						return MACHINE.lowerlevel;
+						break;
+				};
+			};
 			
 			var STATE = {
 				current : null,
 				level : null
 			};
 			
-			var MACHINE = {
-				top : {
-					keydown : {
-						37 : "previous", // left
-						39 : "next", // right
-						40 : "open", // down
-						27 : "blur" // esc
-					},
-					
-					previous : function(item) {
-						item.parent().circularPrev("li").find("> a").focus();
-					},
-					
-					next : function(item) {
-						item.parent().circularNext("li").find("> a").focus();
-					},
-					
-					open : function(item) {
-						item.parent().find("> ul").show().find("> li:first-child > a").focus();
-					},
-					
-					blur : function(item) {
-						item.blur();
-					}
+			var MACHINE = {};
+			
+			MACHINE.top = {
+				keydown : {
+					37 : ["closeOthers", "previous"], // left
+					39 : ["closeOthers", "next"], // right
+					40 : ["closeOthers", "open", "focusFirst"], // down
+					27 : "blur" // esc
+				},
+				
+				mouse : {
+					over : ["closeOthers", "open"]
+				},
+				
+				previous : function(item) {
+					item.parent().circularPrev("li").find("> a").focus();
+				},
+				
+				next : function(item) {
+					item.parent().circularNext("li").find("> a").focus();
+				},
+				
+				open : function(item) {
+					item.parent().find("> ul").show();
+				},
+				
+				blur : function(item) {
+					item.blur();
+				},
+				
+				focusFirst : function(item) {
+					item.parent().find("> ul > li:first-child > a").focus();
+				},
+				
+				closeOthers : function(item) {
+					item.parent().parent().find("ul").hide();
+				},
+				
+				toString : function() {
+					return "[Machine top]";
 				}
 			};
-			MACHINE.firstlevel = {
+			
+			MACHINE.firstlevel = $.extend({}, MACHINE.top, {
 				keydown : {
 					37 : "close", // left
 					38 : "previous", // up
-					39 : "open", // right
+					39 : ["open", "focusFirst"], // right
 					40 : "next", // down
 					27 : "up", // esc
 					9 : "blur" // tab
@@ -159,12 +224,6 @@
 					previousMenu.find("> ul").show().find("> li:first-child > a").focus();
 				},
 				
-				previous : MACHINE.top.previous,
-				
-				open : MACHINE.top.open,
-				
-				next : MACHINE.top.next,
-				
 				up : function(item) {
 					item.parent().parent().hide().parent().find("> a").focus();
 				},
@@ -172,13 +231,18 @@
 				blur : function(item) {
 					item.parents("ul:not(#nav)").hide();
 					changeFocusable(item.parents("#nav > li").find("> a"));
+				},
+				
+				toString : function() {
+					return "[Machine first]";
 				}
-			};
-			MACHINE.lowerlevel = {
+			});
+			
+			MACHINE.lowerlevel = $.extend({}, MACHINE.firstlevel, {
 				keydown : {
 					37 : "close", // left
 					38 : "previous", // up
-					39 : "open", // right
+					39 : "openornext", // right
 					40 : "next", // down
 					27 : "up", // esc
 					9 : "blur" // tab
@@ -188,9 +252,7 @@
 					item.parent().parent().hide().parent().find("> a").focus();
 				},
 				
-				previous : MACHINE.top.previous,
-				
-				open : function(item) {
+				openornext : function(item) {
 					var list = item.parent().find("> ul");
 					if (list.length) {
 						list.show().find("> li:first-child > a").focus();
@@ -202,12 +264,10 @@
 					}
 				},
 				
-				next : MACHINE.top.next,
-				
-				up : MACHINE.firstlevel.up,
-				
-				blur : MACHINE.firstlevel.blur
-			};
+				toString : function() {
+					return "[Machine lower]";
+				}
+			});
 			
 			$.fn.circularNext = function(pattern) {
 				var el = $(this),
